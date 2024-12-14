@@ -31,6 +31,7 @@ bedrock_client_config = Config(retries=dict(max_attempts=10, mode="standard"))
 bedrock_client = boto3.client("bedrock-runtime", config=bedrock_client_config)
 bedrock_agent_client = boto3.client("bedrock-agent-runtime")
 wa_client = boto3.client("wellarchitected")
+sts_client = boto3.client("sts")
 
 
 st.set_page_config(
@@ -92,7 +93,7 @@ def upload_file_to_s3(uploaded_file, iac_template_s3_bucket):
             uploaded_file, iac_template_s3_bucket, uploaded_file.name
         )
         file_url = f"https://{iac_template_s3_bucket}.s3.{s3_client.meta.region_name}.amazonaws.com/{uploaded_file.name}"
-        st.success(f"File uploaded successfully!")
+        st.success("File uploaded successfully!")
         return file_url
     except ClientError as e:
         st.error(f"Error uploading file to S3: {e}")
@@ -203,11 +204,11 @@ def build_model_prompts(pillar, question, question_best_practices_json, iac_temp
 
     system_prompt = f"""You are an AWS Cloud Solutions Architect who specializes in reviewing solution architecture documents against the AWS Well-Architected Framework, using a process called the Well-Architected Framework Review (WAFR).
     The WAFR process consists of evaluating the provided solution architecture document against the 6 pillars of the Well-Architected Framework, namely - Operational Excellence Pillar, Security Pillar, Reliability Pillar, Performance Efficiency Pillar, Cost Optimization Pillar, and Sustainability Pillar - by asking fixed questions for each pillar.
-    The content of a CloudFormation or Terraform template document is provided below in the "uploaded_template_document" section. Follow the instructions listed under "instructions" section below. 
-    
+    The content of a CloudFormation or Terraform template document is provided below in the "uploaded_template_document" section. Follow the instructions listed under "instructions" section below.
+
     <instructions>
     1) In the "best_practices_json" section, you are provided with the name of the {number_of_bps} Best Practices related to the questions "{question}" of the Well-Architected Framework. For each Best Practice, determine if it is applied or not in the given CloudFormation or Terraform template document.
-    2) For each of the {number_of_bps} best practices listed in the "best_practices_json" section, create your respond in the following EXACT JSON format only (Important, use the EXACT best practice name as given in the Best Practices): 
+    2) For each of the {number_of_bps} best practices listed in the "best_practices_json" section, create your respond in the following EXACT JSON format only (Important, use the EXACT best practice name as given in the Best Practices):
     [
         {{
             "Best Practice Name": [Exact Best Practice Name as given in Best Practices in the "best_practices_json" section],
@@ -282,7 +283,6 @@ def invoke_model(system_prompt, prompt):
 def analyze_template_with_bedrock(
     best_practices_json_path, uploaded_file, pillars_checks
 ):
-
     best_practices = get_bp_json_file(best_practices_json_path)
 
     iac_template = get_iac_template_file(uploaded_file)
@@ -302,7 +302,6 @@ def analyze_template_with_bedrock(
     question_analysis_progress = st.progress(0, text="Starting analysis...")
 
     for question in questions:
-
         # Get all best practices for a particular question
         question_best_practices = [
             item for item in best_practices if item["Question"] == question
@@ -352,7 +351,7 @@ def analyze_template_with_bedrock(
     question_analysis_progress.empty()
 
 
-def display_result_applied_bps(analysis_results, file_path, workload_id_input):
+def display_result_applied_bps(analysis_results, file_path, workload_id):
     response = s3_client.get_object(Bucket=wa_docs_s3_bucket, Key=file_path)
     content = response["Body"].read().decode("utf-8")
     best_practices = pd.read_csv(StringIO(content))
@@ -383,7 +382,7 @@ def display_result_applied_bps(analysis_results, file_path, workload_id_input):
         # Get the pillar ID
         pillar_id = None
         lens_review_response = wa_client.get_lens_review(
-            WorkloadId=workload_id_input, LensAlias=lens_alias
+            WorkloadId=workload_id, LensAlias=lens_alias
         )
         for pillar_summary in lens_review_response.get("LensReview", {}).get(
             "PillarReviewSummaries", []
@@ -404,7 +403,7 @@ def display_result_applied_bps(analysis_results, file_path, workload_id_input):
         while True:
             # Build the API request parameters
             params = {
-                "WorkloadId": workload_id_input,
+                "WorkloadId": workload_id,
                 "LensAlias": lens_alias,
                 "PillarId": pillar_id,
             }
@@ -471,7 +470,7 @@ def display_result_applied_bps(analysis_results, file_path, workload_id_input):
                 st.markdown(content)
 
 
-def display_result_not_applied_bps(analysis_results, file_path, workload_id_input):
+def display_result_not_applied_bps(analysis_results, file_path, workload_id):
     response = s3_client.get_object(Bucket=wa_docs_s3_bucket, Key=file_path)
     content = response["Body"].read().decode("utf-8")
     best_practices = pd.read_csv(StringIO(content))
@@ -502,7 +501,7 @@ def display_result_not_applied_bps(analysis_results, file_path, workload_id_inpu
         # Get the pillar ID
         pillar_id = None
         lens_review_response = wa_client.get_lens_review(
-            WorkloadId=workload_id_input, LensAlias=lens_alias
+            WorkloadId=workload_id, LensAlias=lens_alias
         )
         for pillar_summary in lens_review_response.get("LensReview", {}).get(
             "PillarReviewSummaries", []
@@ -523,7 +522,7 @@ def display_result_not_applied_bps(analysis_results, file_path, workload_id_inpu
         while True:
             # Build the API request parameters
             params = {
-                "WorkloadId": workload_id_input,
+                "WorkloadId": workload_id,
                 "LensAlias": lens_alias,
                 "PillarId": pillar_id,
             }
@@ -590,10 +589,10 @@ def display_result_not_applied_bps(analysis_results, file_path, workload_id_inpu
 
 
 ##Functions related to Update Button
-def update_workload(analysis_results, file_path, workload_id_input):
+def update_workload(analysis_results, file_path, workload_id):
     # Fetch workload and lens review details
     lens_review_response = wa_client.get_lens_review(
-        WorkloadId=workload_id_input, LensAlias=lens_alias
+        WorkloadId=workload_id, LensAlias=lens_alias
     )
 
     # Read best practices from S3
@@ -639,7 +638,7 @@ def update_workload(analysis_results, file_path, workload_id_input):
             try:
                 # Build the API request parameters
                 params = {
-                    "WorkloadId": workload_id_input,
+                    "WorkloadId": workload_id,
                     "LensAlias": lens_alias,
                     "PillarId": pillar_id,
                 }
@@ -684,7 +683,7 @@ def update_workload(analysis_results, file_path, workload_id_input):
                                         )  # Remove duplicates
                                         # Update the WA Tool workload question with the followed merge followed choices (best practices) as per model analysis.
                                         wa_client.update_answer(
-                                            WorkloadId=workload_id_input,
+                                            WorkloadId=workload_id,
                                             LensAlias=lens_alias,
                                             QuestionId=question_id,
                                             SelectedChoices=updated_choices,
@@ -702,11 +701,11 @@ def update_workload(analysis_results, file_path, workload_id_input):
                 )
                 return e
 
-    create_milestone(workload_id_input)
+    create_milestone(workload_id)
     return "Success"
 
 
-def create_milestone(workload_id_input):
+def create_milestone(workload_id):
     # Define a milestone name with current date and time
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     milestone_name = f"Review completed on {current_datetime}"
@@ -714,7 +713,7 @@ def create_milestone(workload_id_input):
 
     try:
         milestone_response = wa_client.create_milestone(
-            WorkloadId=workload_id_input,
+            WorkloadId=workload_id,
             MilestoneName=milestone_name,
             ClientRequestToken=client_request_token,
         )
@@ -724,7 +723,7 @@ def create_milestone(workload_id_input):
         logger.error(f"Error creating milestone: {str(e)}")
 
 
-def summarize_risks(workload_id_input, lens_alias):
+def summarize_risks(workload_id, lens_alias):
     # Initialize counters for different risk levels
     pillar_summaries = {}
     total_questions = 0
@@ -732,7 +731,7 @@ def summarize_risks(workload_id_input, lens_alias):
 
     # Retrieve all pillars for the lens review
     lens_review_response = wa_client.get_lens_review(
-        WorkloadId=workload_id_input, LensAlias=lens_alias
+        WorkloadId=workload_id, LensAlias=lens_alias
     )
 
     # Loop through each pillar and list answers for each pillar
@@ -757,7 +756,7 @@ def summarize_risks(workload_id_input, lens_alias):
             try:
                 # Build the API request parameters
                 params = {
-                    "WorkloadId": workload_id_input,
+                    "WorkloadId": workload_id,
                     "LensAlias": lens_alias,
                     "PillarId": pillar_id,
                 }
@@ -842,11 +841,11 @@ def display_risk_summary(pillar_summaries, total_questions, answered_questions):
 
 
 # Functions related to Generate Button
-def generate_and_download_report(workload_id_input, lens_alias):
+def generate_and_download_report(workload_id, lens_alias):
     try:
         # Generate the report using GetLensReviewReport API
         response = wa_client.get_lens_review_report(
-            WorkloadId=workload_id_input, LensAlias=lens_alias
+            WorkloadId=workload_id, LensAlias=lens_alias
         )
 
         # Extract the Base64 encoded report data
@@ -861,7 +860,7 @@ def generate_and_download_report(workload_id_input, lens_alias):
 
         # Create a download link
         b64 = base64.b64encode(report_data).decode()
-        href = f'<a href="data:application/pdf;base64,{b64}" download="WA_Review_Report_{workload_id_input}.pdf">Click here to download the report</a>'
+        href = f'<a href="data:application/pdf;base64,{b64}" download="WA_Review_Report_{workload_id}.pdf">Click here to download the report</a>'
         st.markdown(href, unsafe_allow_html=True)
 
         return "Report generated successfully"
@@ -890,6 +889,60 @@ def generate_and_download_report(workload_id_input, lens_alias):
         return None
 
 
+# Create a session with the assumed role credentials
+def get_session(role_arn_input):
+    try:
+        assumed_role = sts_client.assume_role(
+            RoleArn=role_arn_input, RoleSessionName="assume_role_session"
+        )
+        credentials = assumed_role["Credentials"]
+        session = boto3.Session(
+            aws_access_key_id=credentials["AccessKeyId"],
+            aws_secret_access_key=credentials["SecretAccessKey"],
+            aws_session_token=credentials["SessionToken"],
+        )
+        return session
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+    return None
+
+
+# Helper function to check if the given workload ARN is valid and if so, get the ID and region
+def extract_id_and_region_from_arn(workload_arn_input):
+    pattern = re.compile(
+        r"^arn:aws:wellarchitected:([a-z0-9-]+):\d{12}:workload/([a-fA-F0-9]{32})$"
+    )
+    match = pattern.match(workload_arn_input)
+    if match:
+        workload_id = match.group(2)
+        region = match.group(1)
+        return workload_id, region
+    else:
+        st.error("Invalid workload ARN format.")
+        return None, None
+
+
+# Helper function to check if the given role ARN is valid
+def is_valid_role_arn(role_arn_input):
+    pattern = re.compile(r"^arn:aws:iam::\d{12}:role/[a-zA-Z_0-9+=,.@-]+$")
+    if pattern.match(role_arn_input):
+        return True
+    else:
+        st.error("Invalid role ARN format.")
+        return False
+
+
+# Helper function to check if the workload with the specified ID exists
+def is_exists_workload(workload_id):
+    try:
+        response = wa_client.get_workload(WorkloadId=workload_id)
+        if response:
+            return True
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+    return False
+
+
 # Convert results to CSV
 def convert_to_csv(analysis_result):
     df = pd.DataFrame(analysis_result)
@@ -915,6 +968,11 @@ def main():
     best_practices_csv_path = "well_architected_best_practices.csv"
 
     # Initialize session state variables
+    global wa_client
+    if "wa_client" not in st.session_state:
+        st.session_state.wa_client = wa_client
+    if "workload_id" not in st.session_state:
+        st.session_state.workload_id = ""
     if "analysis_result" not in st.session_state:
         st.session_state.analysis_result = None
     if "analyze_disabled" not in st.session_state:
@@ -940,15 +998,20 @@ def main():
     if uploaded_file is not None:
         s3_url = upload_file_to_s3(uploaded_file, iac_template_s3_bucket)
 
-        workload_id_input = st.text_input(
-            "Type below your Well-Architected Tool [Workload Id](https://docs.aws.amazon.com/wellarchitected/latest/userguide/define-workload.html) (*The Id is in the workload's ARN, E.g. arn:aws:wellarchitected:<aws_region>:<account_id>:workload/**:orange[<workload_id>]***)",
+        workload_arn_input = st.text_input(
+            "Enter your Workload ARN.",
             "",
         )
 
-        if workload_id_input and workload_id_input != "":
+        if workload_arn_input and workload_arn_input != "":
             st.session_state.analyze_disabled = False
         else:
             st.session_state.analyze_disabled = True
+
+        role_arn_input = st.text_input(
+            "If you are handling workloads for another account, enter the IAM role ARN to assume that role. (Optional)",
+            "",
+        )
 
         pillars_checks = st.multiselect(
             "Select the [Well-Architected Pillars](https://docs.aws.amazon.com/wellarchitected/latest/framework/the-pillars-of-the-framework.html) to review:",
@@ -1005,6 +1068,29 @@ def main():
             )
 
         if s3_url and analyze_button:
+            with st.spinner("Validating your input..."):
+                workload_arn_input = workload_arn_input.strip()
+                workload_id, region = extract_id_and_region_from_arn(workload_arn_input)
+                if workload_id is None or region is None:
+                    return None
+                st.session_state.workload_id = workload_id
+
+                if role_arn_input and role_arn_input != "":
+                    role_arn_input = role_arn_input.strip()
+                    if is_valid_role_arn(role_arn_input):
+                        session = get_session(role_arn_input)
+                        if not session:
+                            return None
+                        wa_client = session.client(
+                            "wellarchitected", region_name=region
+                        )
+                        st.session_state.wa_client = wa_client
+                    else:
+                        return None
+
+                if not is_exists_workload(workload_id):
+                    return None
+
             if st.session_state.analyze_click == 1:
                 with st.spinner("Checking your workload for AWS best practices..."):
                     analysis_generator = analyze_template_with_bedrock(
@@ -1022,12 +1108,12 @@ def main():
                         display_result_not_applied_bps(
                             st.session_state.analysis_result,
                             best_practices_csv_path,
-                            workload_id_input,
+                            workload_id,
                         )
                         display_result_applied_bps(
                             st.session_state.analysis_result,
                             best_practices_csv_path,
-                            workload_id_input,
+                            workload_id,
                         )
                     else:
                         st.error("Failed to analyze the template. Please try again.")
@@ -1038,15 +1124,18 @@ def main():
                 display_result_not_applied_bps(
                     st.session_state.analysis_result,
                     best_practices_csv_path,
-                    workload_id_input,
+                    workload_id,
                 )
                 display_result_applied_bps(
                     st.session_state.analysis_result,
                     best_practices_csv_path,
-                    workload_id_input,
+                    workload_id,
                 )
 
         if update_button and st.session_state.analysis_result:
+            workload_id = st.session_state.get("workload_id", "")
+            wa_client = st.session_state.get("wa_client", None)
+
             if st.session_state.update_click == 1:
                 with st.spinner(
                     "Updating answers in the Well-Architected Tool workload..."
@@ -1054,7 +1143,7 @@ def main():
                     status = update_workload(
                         st.session_state.analysis_result,
                         best_practices_csv_path,
-                        workload_id_input,
+                        workload_id,
                     )
                     if status == "Success":
                         st.success(
@@ -1063,7 +1152,7 @@ def main():
                         st.session_state.update_click += 1
 
                         pillar_summaries, total_questions, answered_questions = (
-                            summarize_risks(workload_id_input, lens_alias)
+                            summarize_risks(workload_id, lens_alias)
                         )
                         display_risk_summary(
                             pillar_summaries, total_questions, answered_questions
@@ -1074,7 +1163,7 @@ def main():
                         st.session_state.report_disabled = True
             else:
                 pillar_summaries, total_questions, answered_questions = summarize_risks(
-                    workload_id_input, lens_alias
+                    workload_id, lens_alias
                 )
                 display_risk_summary(
                     pillar_summaries, total_questions, answered_questions
@@ -1106,10 +1195,13 @@ def main():
 
         # Display report download link
         if wa_tool_report_button and st.session_state.analysis_result:
+            workload_id = st.session_state.get("workload_id", "")
+            wa_client = st.session_state.get("wa_client", None)
+
             with st.spinner("Generating Well-Architected Tool Report..."):
                 try:
                     response = wa_client.get_lens_review_report(
-                        WorkloadId=workload_id_input, LensAlias=lens_alias
+                        WorkloadId=workload_id, LensAlias=lens_alias
                     )
                     base64_string = response.get("LensReviewReport", {}).get(
                         "Base64String"
